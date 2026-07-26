@@ -40,12 +40,16 @@ const connection = new TikTokLiveConnection(
 
 const eventQueue = [];
 
-
 let connected = false;
 
 
 
+// pessoas que seguiram nessa live
 const liveFollowers = new Set();
+
+
+// pessoas que já criaram personagem pelo chat
+const usedChatUsers = new Set();
 
 
 
@@ -66,6 +70,7 @@ function cleanUsername(name){
 
 
 
+
 function addEvent(event){
 
 
@@ -76,6 +81,7 @@ function addEvent(event){
 
     eventType:
       event.eventType,
+
 
     username:
       cleanUsername(event.username || "TikTokUser"),
@@ -105,7 +111,6 @@ function addEvent(event){
 
 
 
-
   while(eventQueue.length > MAX_QUEUE_SIZE){
 
     eventQueue.shift();
@@ -120,12 +125,9 @@ function addEvent(event){
 
 
 
-
 function isAuthorized(request){
 
-
   return request.get("x-bridge-token") === BRIDGE_TOKEN;
-
 
 }
 // FOLLOW
@@ -155,21 +157,6 @@ connection.on("follow",(data)=>{
 
 
 
-  addEvent({
-
-    eventType:"follow",
-
-    username,
-
-    giftType:"Follow",
-
-    coinValue:0,
-
-    quantity:1
-
-  });
-
-
 });
 
 
@@ -178,11 +165,9 @@ connection.on("follow",(data)=>{
 
 
 
+
+
 // CHAT
-
-const chatCooldown = new Set();
-
-
 
 connection.on("chat",(data)=>{
 
@@ -227,13 +212,14 @@ connection.on("chat",(data)=>{
 
 
 
-  // só deixa 1 mensagem por pessoa a cada minuto
 
-  if(chatCooldown.has(username)){
+  // precisa ter seguido primeiro
+
+  if(!liveFollowers.has(username)){
 
 
     console.log(
-      "CHAT bloqueado:",
+      "Pessoa não seguiu:",
       username
     );
 
@@ -245,25 +231,45 @@ connection.on("chat",(data)=>{
 
 
 
-  chatCooldown.add(username);
 
 
 
-  setTimeout(()=>{
+  // só deixa criar 1 personagem por seguidor
 
-    chatCooldown.delete(username);
+  if(usedChatUsers.has(username)){
 
-  },60000);
+
+    console.log(
+      "Já criou personagem:",
+      username
+    );
+
+
+    return;
+
+  }
+
+
+
+
+
+
+  usedChatUsers.add(username);
+
+
 
 
 
 
 
   console.log(
-    "CHAT RECEBIDO:",
+    "CHAT USADO:",
     username,
+    "=>",
     comment
   );
+
+
 
 
 
@@ -325,7 +331,8 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
 
-  // evita mandar presente repetido
+
+  // espera acabar a sequência do presente
 
   if(data.repeatEnd === false){
 
@@ -337,9 +344,13 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
 
+
+
   console.log(
     `PRESENTE: ${username} enviou ${giftName} x${quantity} (${coinValue} moedas)`
   );
+
+
 
 
 
@@ -363,6 +374,7 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
 });
+
 
 
 
@@ -495,6 +507,7 @@ app.get("/",(_request,response)=>{
 
 
 
+
 // ROBLOX PEGA EVENTOS
 
 app.get("/events",(request,response)=>{
@@ -517,11 +530,13 @@ app.get("/events",(request,response)=>{
 
 
 
+
   const events =
     eventQueue.splice(
       0,
       eventQueue.length
     );
+
 
 
 
@@ -545,6 +560,11 @@ app.get("/events",(request,response)=>{
 
 
 
+
+
+
+
+// INICIAR SERVIDOR
 
 app.listen(PORT,()=>{
 
