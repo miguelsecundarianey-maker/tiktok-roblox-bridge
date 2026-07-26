@@ -14,7 +14,9 @@ if (!TIKTOK_USERNAME || !BRIDGE_TOKEN) {
   process.exit(1);
 }
 
-const connection = new TikTokLiveConnection(TIKTOK_USERNAME);
+const connection = new TikTokLiveConnection(TIKTOK_USERNAME, {
+  processInitialData: false
+});
 const eventQueue = [];
 let connected = false;
 
