@@ -17,6 +17,7 @@ if (!TIKTOK_USERNAME || !BRIDGE_TOKEN) {
 const connection = new TikTokLiveConnection(TIKTOK_USERNAME, {
   processInitialData: false
 });
+
 const eventQueue = [];
 let connected = false;
 
@@ -41,13 +42,23 @@ function isAuthorized(request) {
   return request.get("x-bridge-token") === BRIDGE_TOKEN;
 }
 
+
+// COMENTÁRIOS DO CHAT
 connection.on(WebcastEvent.CHAT, (data) => {
+
   const username =
     data.user?.uniqueId ||
     data.user?.nickname ||
     "TikTokUser";
 
-  const comment = data.comment || "";
+
+  const comment =
+    data.comment ||
+    data.message ||
+    data.content ||
+    data.text ||
+    "";
+
 
   addEvent({
     eventType: "comment",
@@ -57,29 +68,42 @@ connection.on(WebcastEvent.CHAT, (data) => {
     quantity: 1
   });
 
-  console.log(`Comentário: ${username}: ${comment}`);
+
+  console.log("CHAT RECEBIDO:");
+  console.log("Usuário:", username);
+  console.log("Comentário:", comment);
+
+  console.log(data);
 });
 
+
+// PRESENTES
 connection.on(WebcastEvent.GIFT, (data) => {
+
   const giftName =
     data.giftDetails?.giftName ||
     data.giftName ||
     "Gift";
 
+
   const coinValue =
     Number(data.giftDetails?.diamondCount || 0);
 
+
   const quantity =
     Number(data.repeatCount || 1);
+
 
   const username =
     data.user?.uniqueId ||
     data.user?.nickname ||
     "TikTokUser";
 
+
   if (data.repeatEnd === false) {
     return;
   }
+
 
   addEvent({
     eventType: "gift",
@@ -89,25 +113,31 @@ connection.on(WebcastEvent.GIFT, (data) => {
     quantity
   });
 
+
   console.log(
-    `Presente: ${username} enviou ${giftName} x${quantity} (${coinValue * quantity} moedas)`
+    `PRESENTE: ${username} enviou ${giftName} x${quantity} (${coinValue * quantity} moedas)`
   );
+
 });
+
 
 connection.on("connected", () => {
   connected = true;
   console.log(`Conectado ao TikTok LIVE de @${TIKTOK_USERNAME}`);
 });
 
+
 connection.on("disconnected", () => {
   connected = false;
   console.log("TikTok LIVE desconectado.");
 });
 
+
 connection.on("error", (error) => {
   connected = false;
   console.error("Erro TikTok:", error.message || error);
 });
+
 
 async function connectToTikTok() {
   try {
@@ -119,6 +149,7 @@ async function connectToTikTok() {
   }
 }
 
+
 app.get("/", (_request, response) => {
   response.json({
     service: "tiktok-roblox-bridge",
@@ -128,17 +159,25 @@ app.get("/", (_request, response) => {
   });
 });
 
+
 app.get("/events", (request, response) => {
+
   if (!isAuthorized(request)) {
-    return response.status(401).json({ error: "Não autorizado" });
+    return response.status(401).json({
+      error: "Não autorizado"
+    });
   }
 
+
   const events = eventQueue.splice(0, eventQueue.length);
+
 
   return response.json({
     events
   });
+
 });
+
 
 app.listen(PORT, () => {
   console.log(`Servidor iniciado na porta ${PORT}`);
