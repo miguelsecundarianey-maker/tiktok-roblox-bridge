@@ -35,6 +35,8 @@ const connection = new TikTokLiveConnection(
 
 
 
+
+
 const eventQueue = [];
 
 let connected = false;
@@ -42,8 +44,9 @@ let connected = false;
 
 
 // =============================
-// SEGUIDORES DA LIVE
+// SEGUIDORES DURANTE A LIVE
 // =============================
+
 
 const liveFollowers = new Set();
 
@@ -54,9 +57,12 @@ const liveFollowers = new Set();
 function addEvent(event) {
 
 
-  // só deixa quem seguiu durante a live
+  // Só deixa passar quem seguiu durante a live
 
-  if(!liveFollowers.has(event.username)){
+  if(
+    event.eventType !== "follow" &&
+    !liveFollowers.has(event.username)
+  ){
 
 
     console.log(
@@ -73,10 +79,12 @@ function addEvent(event) {
 
 
 
+
   eventQueue.push({
 
     id:
       `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+
 
     eventType:
       event.eventType,
@@ -117,6 +125,7 @@ function addEvent(event) {
 
   }
 
+
 }
 
 
@@ -138,17 +147,27 @@ function isAuthorized(request){
 // FOLLOW
 // =============================
 
-connection.on(WebcastEvent.FOLLOW, (data)=>{
+
+connection.on("follow",(data)=>{
+
+
+  console.log("FOLLOW RAW:");
+  console.log(data);
+
 
 
   const username =
     data.user?.uniqueId ||
     data.user?.nickname ||
+    data.uniqueId ||
+    data.nickname ||
     "TikTokUser";
 
 
 
+
   liveFollowers.add(username);
+
 
 
 
@@ -158,19 +177,14 @@ connection.on(WebcastEvent.FOLLOW, (data)=>{
   );
 
 
+
 });
-
-
-
-
-
-
-
 // =============================
 // CHAT
 // =============================
 
-connection.on(WebcastEvent.CHAT, (data)=>{
+
+connection.on(WebcastEvent.CHAT,(data)=>{
 
 
   const username =
@@ -186,6 +200,24 @@ connection.on(WebcastEvent.CHAT, (data)=>{
     data.content ||
     data.text ||
     "";
+
+
+
+
+
+  // ignora comentários marcando alguém
+
+  if(comment.includes("@")){
+
+    console.log(
+      "Comentário ignorado (tem @):",
+      comment
+    );
+
+    return;
+
+  }
+
 
 
 
@@ -208,6 +240,7 @@ connection.on(WebcastEvent.CHAT, (data)=>{
 
 
 
+
   console.log(
     "CHAT:",
     username,
@@ -223,9 +256,11 @@ connection.on(WebcastEvent.CHAT, (data)=>{
 
 
 
+
 // =============================
 // PRESENTES
 // =============================
+
 
 connection.on(WebcastEvent.GIFT,(data)=>{
 
@@ -260,6 +295,8 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
 
+  // espera terminar sequência do presente
+
   if(data.repeatEnd === false){
 
     return;
@@ -291,7 +328,7 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
   console.log(
-    `PRESENTE: ${username} enviou ${giftName} x${quantity}`
+    `PRESENTE: ${username} enviou ${giftName} x${quantity} (${coinValue * quantity} moedas)`
   );
 
 
@@ -301,6 +338,10 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
 
+
+// =============================
+// CONEXÃO
+// =============================
 
 
 connection.on("connected",()=>{
@@ -337,7 +378,6 @@ connection.on("disconnected",()=>{
 
 
 
-
 connection.on("error",(error)=>{
 
 
@@ -351,11 +391,9 @@ connection.on("error",(error)=>{
 
 
 });
-
-
-
-
-
+// =============================
+// CONECTAR NO TIKTOK
+// =============================
 
 
 async function connectToTikTok(){
@@ -367,15 +405,19 @@ async function connectToTikTok(){
     await connection.connect();
 
 
+
   }catch(error){
 
 
-    connected=false;
+
+    connected = false;
+
 
 
     console.error(
-      "Falha ao conectar. Tentando novamente..."
+      "Falha ao conectar no TikTok. Tentando novamente em 15 segundos..."
     );
+
 
 
     setTimeout(
@@ -395,23 +437,50 @@ async function connectToTikTok(){
 
 
 
+
+
+// =============================
+// STATUS DO SERVIDOR
+// =============================
+
+
 app.get("/",(_request,response)=>{
 
 
   response.json({
 
-    service:"tiktok-roblox-bridge",
+
+    service:
+      "tiktok-roblox-bridge",
+
+
 
     connected,
 
-    username:TIKTOK_USERNAME,
 
-    queuedEvents:eventQueue.length,
+
+    username:
+      TIKTOK_USERNAME,
+
+
+
+    queuedEvents:
+      eventQueue.length,
+
+
 
     followersDuringLive:
-      liveFollowers.size
+      liveFollowers.size,
+
+
+
+    followers:
+      Array.from(liveFollowers)
+
+
 
   });
+
 
 
 });
@@ -423,6 +492,12 @@ app.get("/",(_request,response)=>{
 
 
 
+
+// =============================
+// EVENTOS PARA O ROBLOX
+// =============================
+
+
 app.get("/events",(request,response)=>{
 
 
@@ -431,7 +506,8 @@ app.get("/events",(request,response)=>{
 
     return response.status(401).json({
 
-      error:"Não autorizado"
+      error:
+        "Não autorizado"
 
     });
 
@@ -453,6 +529,7 @@ app.get("/events",(request,response)=>{
 
 
 
+
   return response.json({
 
     events
@@ -460,13 +537,11 @@ app.get("/events",(request,response)=>{
   });
 
 
+
 });
-
-
-
-
-
-
+// =============================
+// INICIAR SERVIDOR
+// =============================
 
 
 app.listen(PORT,()=>{
@@ -475,6 +550,7 @@ app.listen(PORT,()=>{
   console.log(
     `Servidor iniciado na porta ${PORT}`
   );
+
 
 
   connectToTikTok();
