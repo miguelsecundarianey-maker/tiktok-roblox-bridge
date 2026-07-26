@@ -15,13 +15,8 @@ const MAX_QUEUE_SIZE = 500;
 
 
 if (!TIKTOK_USERNAME || !BRIDGE_TOKEN) {
-
-  console.error(
-    "TIKTOK_USERNAME e BRIDGE_TOKEN são obrigatórios."
-  );
-
+  console.error("TIKTOK_USERNAME e BRIDGE_TOKEN são obrigatórios.");
   process.exit(1);
-
 }
 
 
@@ -35,39 +30,48 @@ const connection = new TikTokLiveConnection(
 
 
 
-
-
 const eventQueue = [];
 
 let connected = false;
 
 
 
-// =============================
-// SEGUIDORES DURANTE A LIVE
-// =============================
-
-
+// seguidores da live
 const liveFollowers = new Set();
 
 
 
+// limpa nome
+function cleanUsername(name){
+
+  return String(name)
+    .toLowerCase()
+    .replace("@","")
+    .trim();
+
+}
 
 
-function addEvent(event) {
 
 
-  // Só deixa passar quem seguiu durante a live
+
+function addEvent(event){
+
+
+  const cleanName =
+    cleanUsername(event.username);
+
+
 
   if(
     event.eventType !== "follow" &&
-    !liveFollowers.has(event.username)
+    !liveFollowers.has(cleanName)
   ){
 
 
     console.log(
-      "IGNORADO - não seguiu durante a live:",
-      event.username
+      "IGNORADO - não seguiu:",
+      cleanName
     );
 
 
@@ -78,37 +82,28 @@ function addEvent(event) {
 
 
 
-
-
   eventQueue.push({
 
     id:
       `${Date.now()}-${Math.random().toString(36).slice(2)}`,
 
-
     eventType:
       event.eventType,
 
-
     username:
-      event.username || "TikTokUser",
-
+      cleanName,
 
     giftType:
       event.giftType || "",
 
-
     coinValue:
       Number(event.coinValue || 0),
-
 
     quantity:
       Number(event.quantity || 1),
 
-
     comment:
       event.comment || "",
-
 
     createdAt:
       new Date().toISOString()
@@ -124,7 +119,6 @@ function addEvent(event) {
     eventQueue.shift();
 
   }
-
 
 }
 
@@ -143,26 +137,20 @@ function isAuthorized(request){
 
 
 
-// =============================
-// FOLLOW
-// =============================
 
+// FOLLOW
 
 connection.on("follow",(data)=>{
 
 
-  console.log("FOLLOW RAW:");
-  console.log(data);
-
-
-
   const username =
-    data.user?.uniqueId ||
-    data.user?.nickname ||
-    data.uniqueId ||
-    data.nickname ||
-    "TikTokUser";
-
+    cleanUsername(
+      data.user?.uniqueId ||
+      data.user?.nickname ||
+      data.uniqueId ||
+      data.nickname ||
+      "TikTokUser"
+    );
 
 
 
@@ -170,27 +158,30 @@ connection.on("follow",(data)=>{
 
 
 
-
   console.log(
-    "NOVO FOLLOW NA LIVE:",
+    "NOVO FOLLOW:",
     username
   );
 
 
-
 });
-// =============================
-// CHAT
-// =============================
 
+
+
+
+
+
+// CHAT
 
 connection.on(WebcastEvent.CHAT,(data)=>{
 
 
   const username =
-    data.user?.uniqueId ||
-    data.user?.nickname ||
-    "TikTokUser";
+    cleanUsername(
+      data.user?.uniqueId ||
+      data.user?.nickname ||
+      "TikTokUser"
+    );
 
 
 
@@ -203,23 +194,26 @@ connection.on(WebcastEvent.CHAT,(data)=>{
 
 
 
+  console.log(
+    "CHAT RECEBIDO:",
+    username,
+    "SEGUE?",
+    liveFollowers.has(username),
+    comment
+  );
 
 
-  // ignora comentários marcando alguém
 
   if(comment.includes("@")){
 
     console.log(
-      "Comentário ignorado (tem @):",
+      "Ignorado porque tem @:",
       comment
     );
 
     return;
 
   }
-
-
-
 
 
 
@@ -238,29 +232,8 @@ connection.on(WebcastEvent.CHAT,(data)=>{
   });
 
 
-
-
-
-  console.log(
-    "CHAT:",
-    username,
-    comment
-  );
-
-
 });
-
-
-
-
-
-
-
-
-// =============================
 // PRESENTES
-// =============================
-
 
 connection.on(WebcastEvent.GIFT,(data)=>{
 
@@ -287,22 +260,21 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
   const username =
-    data.user?.uniqueId ||
-    data.user?.nickname ||
-    "TikTokUser";
+    cleanUsername(
+      data.user?.uniqueId ||
+      data.user?.nickname ||
+      "TikTokUser"
+    );
 
 
 
 
-
-  // espera terminar sequência do presente
 
   if(data.repeatEnd === false){
 
     return;
 
   }
-
 
 
 
@@ -328,7 +300,7 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
   console.log(
-    `PRESENTE: ${username} enviou ${giftName} x${quantity} (${coinValue * quantity} moedas)`
+    `PRESENTE: ${username} enviou ${giftName} x${quantity}`
   );
 
 
@@ -339,13 +311,10 @@ connection.on(WebcastEvent.GIFT,(data)=>{
 
 
 
-// =============================
-// CONEXÃO
-// =============================
 
+// CONEXÃO
 
 connection.on("connected",()=>{
-
 
   connected = true;
 
@@ -353,7 +322,6 @@ connection.on("connected",()=>{
   console.log(
     `Conectado ao TikTok LIVE de @${TIKTOK_USERNAME}`
   );
-
 
 });
 
@@ -363,14 +331,12 @@ connection.on("connected",()=>{
 
 connection.on("disconnected",()=>{
 
-
   connected = false;
 
 
   console.log(
-    "TikTok LIVE desconectado."
+    "TikTok desconectado"
   );
-
 
 });
 
@@ -380,44 +346,33 @@ connection.on("disconnected",()=>{
 
 connection.on("error",(error)=>{
 
-
-  connected = false;
-
-
   console.error(
     "Erro TikTok:",
     error.message || error
   );
 
-
 });
-// =============================
-// CONECTAR NO TIKTOK
-// =============================
+
+
+
+
+
+
 
 
 async function connectToTikTok(){
 
-
   try{
 
-
     await connection.connect();
-
 
 
   }catch(error){
 
 
-
-    connected = false;
-
-
-
-    console.error(
-      "Falha ao conectar no TikTok. Tentando novamente em 15 segundos..."
+    console.log(
+      "Erro ao conectar, tentando novamente..."
     );
-
 
 
     setTimeout(
@@ -428,7 +383,6 @@ async function connectToTikTok(){
 
   }
 
-
 }
 
 
@@ -437,50 +391,28 @@ async function connectToTikTok(){
 
 
 
-
-
-// =============================
-// STATUS DO SERVIDOR
-// =============================
-
+// STATUS
 
 app.get("/",(_request,response)=>{
 
 
   response.json({
 
-
-    service:
-      "tiktok-roblox-bridge",
-
-
+    service:"tiktok-roblox-bridge",
 
     connected,
 
+    username:TIKTOK_USERNAME,
 
-
-    username:
-      TIKTOK_USERNAME,
-
-
-
-    queuedEvents:
-      eventQueue.length,
-
-
+    queuedEvents:eventQueue.length,
 
     followersDuringLive:
       liveFollowers.size,
 
-
-
     followers:
       Array.from(liveFollowers)
 
-
-
   });
-
 
 
 });
@@ -491,12 +423,7 @@ app.get("/",(_request,response)=>{
 
 
 
-
-
-// =============================
-// EVENTOS PARA O ROBLOX
-// =============================
-
+// ROBLOX PEGA EVENTOS
 
 app.get("/events",(request,response)=>{
 
@@ -506,14 +433,12 @@ app.get("/events",(request,response)=>{
 
     return response.status(401).json({
 
-      error:
-        "Não autorizado"
+      error:"Não autorizado"
 
     });
 
 
   }
-
 
 
 
@@ -529,19 +454,20 @@ app.get("/events",(request,response)=>{
 
 
 
-
-  return response.json({
+  response.json({
 
     events
 
   });
 
 
-
 });
-// =============================
-// INICIAR SERVIDOR
-// =============================
+
+
+
+
+
+
 
 
 app.listen(PORT,()=>{
@@ -550,7 +476,6 @@ app.listen(PORT,()=>{
   console.log(
     `Servidor iniciado na porta ${PORT}`
   );
-
 
 
   connectToTikTok();
