@@ -173,7 +173,7 @@ connection.on("follow",(data)=>{
 
 // CHAT
 
-connection.on(WebcastEvent.CHAT,(data)=>{
+connection.on("chat",(data)=>{
 
 
   const username =
