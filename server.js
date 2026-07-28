@@ -1,842 +1,406 @@
 const express = require("express");
 const { TikTokLiveConnection, WebcastEvent } = require("tiktok-live-connector");
 
-
 const app = express();
-
 app.use(express.json());
-
-
 
 const PORT = process.env.PORT || 3000;
 
-
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
-
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
-
-
 
 const MAX_QUEUE_SIZE = 500;
 
-
-
-
-
 if (!TIKTOK_USERNAME || !BRIDGE_TOKEN) {
 
-
-  console.error(
-    "TIKTOK_USERNAME e BRIDGE_TOKEN são obrigatórios."
-  );
-
-
-  process.exit(1);
-
+    console.error("TIKTOK_USERNAME e BRIDGE_TOKEN são obrigatórios.");
+    process.exit(1);
 
 }
 
-
-
-
-
-
-const connection =
-  new TikTokLiveConnection(
-
+const connection = new TikTokLiveConnection(
     TIKTOK_USERNAME,
-
     {
-      processInitialData:false
+        processInitialData: false
     }
-
-  );
-
-
-
-
-
-
-
+);
 
 const eventQueue = [];
 
-
-
 let connected = false;
 
+// Pessoas que seguiram
+const liveFollowers = new Set();
 
+// Quem já criou personagem
+const usedChatUsers = new Set();
 
-
-
-// quem seguiu durante a live
-
-const liveFollowers =
-  new Set();
-
-
-
-
-
-// quem já ganhou personagem pelo comentário
-
-const usedChatUsers =
-  new Set();
-
-
-
-
-
-
+// Presentes acumulados
+const pendingGifts = {};
 
 function cleanUsername(name){
 
-
-  return String(name)
-
-    .toLowerCase()
-
-    .replace("@","")
-
-    .trim();
-
+    return String(name || "")
+        .replace("@","")
+        .trim()
+        .toLowerCase();
 
 }
-
-
-
-
-
-
-
 
 function addEvent(event){
 
+    eventQueue.push({
 
-  eventQueue.push({
+        id:
+            `${Date.now()}-${Math.random().toString(36).slice(2)}`,
 
+        eventType:
+            event.eventType,
 
-    id:
-      `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        username:
+            cleanUsername(event.username),
 
+        giftType:
+            event.giftType || "",
 
+        coinValue:
+            Number(event.coinValue || 0),
 
-    eventType:
-      event.eventType,
+        quantity:
+            Number(event.quantity || 1),
 
+        comment:
+            event.comment || "",
 
+        createdAt:
+            new Date().toISOString()
 
-    username:
-      cleanUsername(
-        event.username || "TikTokUser"
-      ),
+    });
 
+    while(eventQueue.length > MAX_QUEUE_SIZE){
 
+        eventQueue.shift();
 
-    giftType:
-      event.giftType || "",
-
-
-
-    coinValue:
-      Number(
-        event.coinValue || 0
-      ),
-
-
-
-    quantity:
-      Number(
-        event.quantity || 1
-      ),
-
-
-
-    comment:
-      event.comment || "",
-
-
-
-    createdAt:
-      new Date().toISOString()
-
-
-
-  });
-
-
-
-
-
-
-  while(
-    eventQueue.length > MAX_QUEUE_SIZE
-  ){
-
-
-    eventQueue.shift();
-
-
-  }
-
+    }
 
 }
 
-
-
-
-
-
-
 function isAuthorized(request){
 
-
-  return (
-    request.get("x-bridge-token")
-    ===
-    BRIDGE_TOKEN
-  );
-
+    return request.get("x-bridge-token") === BRIDGE_TOKEN;
 
 }
 // =======================
 // FOLLOW
 // =======================
 
+connection.on("follow", (data) => {
 
-connection.on("follow",(data)=>{
+    const username = cleanUsername(
 
-
-  const username =
-    cleanUsername(
-
-      data.user?.uniqueId ||
-
-      data.user?.nickname ||
-
-      data.uniqueId ||
-
-      data.nickname ||
-
-      "TikTokUser"
+        data.user?.uniqueId ||
+        data.user?.nickname ||
+        data.uniqueId ||
+        data.nickname ||
+        "TikTokUser"
 
     );
 
+    if (liveFollowers.has(username)) {
+        return;
+    }
 
+    liveFollowers.add(username);
 
-
-
-  liveFollowers.add(username);
-
-
-
-
-
-  console.log(
-    "NOVO FOLLOW:",
-    username
-  );
-
-
+    console.log(`⭐ ${username} começou a seguir.`);
 
 });
-
-
-
-
-
-
-
-
 
 // =======================
 // CHAT
 // =======================
 
+connection.on("chat", (data) => {
 
-connection.on("chat",(data)=>{
+    const username = cleanUsername(
 
-
-
-  const username =
-    cleanUsername(
-
-      data.user?.uniqueId ||
-
-      data.user?.nickname ||
-
-      "TikTokUser"
+        data.user?.uniqueId ||
+        data.user?.nickname ||
+        "TikTokUser"
 
     );
 
+    const comment =
+        data.comment ||
+        data.message ||
+        data.content ||
+        data.text ||
+        "";
 
+    if (!comment) return;
 
+    // Ignora mensagens com @
+    if (comment.includes("@")) {
+        return;
+    }
 
+    // Precisa seguir primeiro
+    if (!liveFollowers.has(username)) {
 
-  const comment =
-    data.comment ||
+        console.log(`${username} comentou mas não segue.`);
 
-    data.message ||
+        return;
 
-    data.content ||
+    }
 
-    data.text ||
+    // Só pode criar um personagem
+    if (usedChatUsers.has(username)) {
 
-    "";
+        console.log(`${username} já criou personagem.`);
 
+        return;
 
+    }
 
+    usedChatUsers.add(username);
 
-
-  if(!comment){
-
-    return;
-
-  }
-
-
-
-
-
-
-  // ignora marcações
-
-  if(comment.includes("@")){
-
+    // Pega todos os presentes acumulados
+    const totalCoins = pendingGifts[username] || 0;
 
     console.log(
-      "CHAT ignorado:",
-      comment
+        `🎮 ${username} criou o personagem ${comment} (${totalCoins} moedas)`
     );
 
+    addEvent({
 
-    return;
+        eventType: "comment",
 
+        username,
 
-  }
+        // Nick do Roblox
+        comment,
 
+        // Vai para o Roblox já com as moedas
+        coinValue: totalCoins,
 
+        quantity: 1
 
+    });
 
-
-
-
-
-  // precisa seguir antes
-
-
-  if(!liveFollowers.has(username)){
-
-
-
-    console.log(
-
-      "Não seguiu:",
-      username
-
-    );
-
-
-
-    return;
-
-
-  }
-
-
-
-
-
-
-
-
-  // apenas 1 personagem por seguidor
-
-
-  if(usedChatUsers.has(username)){
-
-
-
-    console.log(
-
-      "Já criou personagem:",
-      username
-
-    );
-
-
-
-    return;
-
-
-  }
-
-
-
-
-
-
-
-
-  usedChatUsers.add(username);
-
-
-
-
-
-
-
-
-  console.log(
-
-    "COMENTÁRIO ACEITO:",
-
-    username,
-
-    "=>",
-
-    comment
-
-  );
-
-
-
-
-
-
-
-
-  addEvent({
-
-
-
-    eventType:
-      "comment",
-
-
-
-    username,
-
-
-
-    comment,
-
-
-
-    coinValue:
-      0,
-
-
-
-    quantity:
-      1
-
-
-
-  });
-
-
-
-
+    // Zera os presentes depois que criou
+    pendingGifts[username] = 0;
 
 });
-
-
-
-
-
-
-
-
 // =======================
 // PRESENTES
 // =======================
 
+connection.on(WebcastEvent.GIFT, (data) => {
 
-connection.on(
-  WebcastEvent.GIFT,
-  (data)=>{
+    // Espera terminar o combo
+    if (data.repeatEnd === false) {
+        return;
+    }
 
+    const username = cleanUsername(
 
-  const giftName =
-
-    data.giftDetails?.giftName ||
-
-    data.giftName ||
-
-    "Gift";
-
-
-
-
-
-  const coinValue =
-
-    Number(
-
-      data.giftDetails?.diamondCount ||
-
-      data.diamondCount ||
-
-      0
+        data.user?.uniqueId ||
+        data.user?.nickname ||
+        "TikTokUser"
 
     );
 
+    const giftName =
 
+        data.giftDetails?.giftName ||
+        data.giftName ||
+        "Gift";
 
+    const coinValue = Number(
 
-
-  const quantity =
-
-    Number(
-
-      data.repeatCount ||
-
-      1
-
-    );
-
-
-
-
-
-  const username =
-
-    cleanUsername(
-
-      data.user?.uniqueId ||
-
-      data.user?.nickname ||
-
-      "TikTokUser"
+        data.giftDetails?.diamondCount ||
+        data.diamondCount ||
+        0
 
     );
 
+    const quantity = Number(
 
+        data.repeatCount ||
+        1
 
+    );
 
+    const totalCoins = coinValue * quantity;
 
+    // Soma os presentes enviados antes do comentário
+    pendingGifts[username] =
+        (pendingGifts[username] || 0) +
+        totalCoins;
 
-
-  // espera terminar combo
-
-  if(data.repeatEnd === false){
-
-
-    return;
-
-
-  }
-
-
-
-
-
-
-
-
-  console.log(
-
-    `PRESENTE: ${username} enviou ${giftName} x${quantity} (${coinValue} moedas)`
-
-  );
-
-
-
-
-
-
-
-
-  addEvent({
-
-
-
-    eventType:
-      "gift",
-
-
-
-    username,
-
-
-
-    giftType:
-      giftName,
-
-
-
-    coinValue:
-      coinValue * quantity,
-
-
-
-    quantity
-
-
-
-  });
-
-
-
+    console.log("=================================");
+    console.log("🎁 PRESENTE RECEBIDO");
+    console.log("👤", username);
+    console.log("🎁", giftName);
+    console.log("📦 Quantidade:", quantity);
+    console.log("💰 Moedas:", totalCoins);
+    console.log("🔥 Total acumulado:", pendingGifts[username]);
+    console.log("=================================");
 
 });
 // =======================
 // CONEXÃO TIKTOK
 // =======================
 
+connection.on("connected", () => {
 
+    connected = true;
 
-connection.on("connected",()=>{
-
-
-  connected = true;
-
-
-
-  console.log(
-
-    `Conectado ao TikTok LIVE de @${TIKTOK_USERNAME}`
-
-  );
-
-
+    console.log("");
+    console.log("======================================");
+    console.log("🟢 TIKTOK LIVE CONECTADA");
+    console.log("👤 @" + TIKTOK_USERNAME);
+    console.log("======================================");
+    console.log("");
 
 });
 
+connection.on("disconnected", () => {
 
+    connected = false;
 
+    console.log("");
+    console.log("🔴 Live desconectada.");
+    console.log("Tentando reconectar em 1 segundo...");
+    console.log("");
 
-
-
-
-
-connection.on("disconnected",()=>{
-
-
-  connected = false;
-
-
-
-  console.log(
-    "TikTok desconectado"
-  );
-
+    setTimeout(connectToTikTok, 1000);
 
 });
 
+connection.on("error", (error) => {
 
+    connected = false;
 
+    console.log("");
+    console.log("❌ Erro:");
+    console.log(error.message || error);
+    console.log("Reconectando em 1 segundo...");
+    console.log("");
 
-
-
-
-
-connection.on("error",(error)=>{
-
-
-  console.error(
-
-    "Erro TikTok:",
-
-    error.message || error
-
-  );
-
+    setTimeout(connectToTikTok, 1000);
 
 });
 
+async function connectToTikTok() {
 
+    if (connected) return;
 
+    try {
 
+        console.log("Tentando conectar...");
 
+        await connection.connect();
 
+    } catch (error) {
 
+        connected = false;
 
-async function connectToTikTok(){
+        console.log("Falhou.");
 
+        setTimeout(connectToTikTok, 1000);
 
-
-  try{
-
-
-
-    await connection.connect();
-
-
-
-  }
-
-  catch(error){
-
-
-
-    console.log(
-
-      "Erro ao conectar, tentando novamente..."
-
-    );
-
-
-
-
-    setTimeout(
-
-      connectToTikTok,
-
-      15000
-
-    );
-
-
-
-  }
-
-
+    }
 
 }
-
-
-
-
-
-
 
 // =======================
 // STATUS
 // =======================
 
+app.get("/", (_request, response) => {
 
+    response.json({
 
-app.get("/",(_request,response)=>{
+        service: "tiktok-roblox-bridge",
 
+        connected,
 
+        username: TIKTOK_USERNAME,
 
-  response.json({
+        queuedEvents: eventQueue.length,
 
+        followersDuringLive: liveFollowers.size,
 
+        followers: Array.from(liveFollowers),
 
-    service:
-      "tiktok-roblox-bridge",
-
-
-
-    connected,
-
-
-
-    username:
-      TIKTOK_USERNAME,
-
-
-
-    queuedEvents:
-      eventQueue.length,
-
-
-
-    followersDuringLive:
-      liveFollowers.size,
-
-
-
-    followers:
-      Array.from(liveFollowers)
-
-
-
-  });
-
-
-
-});
-// =======================
-// ROBLOX PEGA EVENTOS
-// =======================
-
-
-app.get("/events",(request,response)=>{
-
-
-  if(!isAuthorized(request)){
-
-
-    return response.status(401).json({
-
-
-      error:
-        "Não autorizado"
-
+        pendingGifts
 
     });
 
+});
 
-  }
+// =======================
+// ROBLOX
+// =======================
 
+app.get("/events", (request, response) => {
 
+    if (!isAuthorized(request)) {
 
+        return response.status(401).json({
 
+            error: "Não autorizado"
 
+        });
 
+    }
 
+    const events = eventQueue.splice(0, eventQueue.length);
 
-  const events =
+    response.json({
 
-    eventQueue.splice(
+        events
 
-      0,
-
-      eventQueue.length
-
-    );
-
-
-
-
-
-
-
-
-  response.json({
-
-
-    events
-
-
-  });
-
-
+    });
 
 });
 
-
-
-
-
-
-
-
-
-
-
 // =======================
-// INICIAR SERVIDOR
+// LIMPEZA
 // =======================
 
+setInterval(() => {
 
-app.listen(PORT,()=>{
+    console.log("🧹 Limpando cache.");
 
+    for (const user in pendingGifts) {
 
-  console.log(
+        if (pendingGifts[user] <= 0) {
 
-    `Servidor iniciado na porta ${PORT}`
+            delete pendingGifts[user];
 
-  );
+        }
 
+    }
 
+}, 600000);
 
-  connectToTikTok();
+// =======================
+// INICIAR
+// =======================
 
+app.listen(PORT, () => {
 
+    console.log("");
+    console.log("======================================");
+    console.log(" TikTok Roblox Bridge ");
+    console.log("======================================");
+    console.log("👤 Conta: @" + TIKTOK_USERNAME);
+    console.log("🌐 Porta: " + PORT);
+    console.log("======================================");
+    console.log("");
+
+    connectToTikTok();
 
 });
