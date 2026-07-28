@@ -1,7 +1,12 @@
 const express = require("express");
-const { TikTokLiveConnection, WebcastEvent } = require("tiktok-live-connector");
+const { 
+    TikTokLiveConnection, 
+    WebcastEvent 
+} = require("tiktok-live-connector");
+
 
 const app = express();
+
 app.use(express.json());
 
 
@@ -12,13 +17,11 @@ const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
 
 
-const MAX_QUEUE_SIZE = 500;
 
-
-if (!TIKTOK_USERNAME || !BRIDGE_TOKEN) {
+if(!TIKTOK_USERNAME || !BRIDGE_TOKEN){
 
     console.error(
-        "TIKTOK_USERNAME e BRIDGE_TOKEN são obrigatórios."
+        "Falta TIKTOK_USERNAME ou BRIDGE_TOKEN"
     );
 
     process.exit(1);
@@ -28,16 +31,27 @@ if (!TIKTOK_USERNAME || !BRIDGE_TOKEN) {
 
 
 
-// =======================
-// VARIÁVEIS GERAIS
-// =======================
+// ==========================
+// CONFIG
+// ==========================
+
+
+const MAX_QUEUE_SIZE = 500;
+
+
+const EVENT_TIMEOUT = 600000;
+
+
+
+
+// ==========================
+// VARIAVEIS
+// ==========================
 
 
 let connection = null;
 
-
 let connected = false;
-
 
 let reconnecting = false;
 
@@ -47,17 +61,14 @@ const eventQueue = [];
 
 
 
-// Quem seguiu
 const liveFollowers = new Set();
 
 
 
-// Quem já criou personagem
-const usedChatUsers = new Set();
+const usedUsers = new Set();
 
 
 
-// Presentes esperando nick Roblox
 const pendingGifts = {};
 
 
@@ -66,12 +77,18 @@ const pendingGifts = {};
 
 
 
+
+// ==========================
+// FUNÇÕES
+// ==========================
+
+
 function cleanUsername(name){
 
     return String(name || "")
-        .replace("@","")
-        .trim()
-        .toLowerCase();
+    .replace("@","")
+    .trim()
+    .toLowerCase();
 
 }
 
@@ -80,46 +97,69 @@ function cleanUsername(name){
 
 
 
+function createEvent(data){
 
-function addEvent(event){
 
+    const event = {
 
-    eventQueue.push({
 
         id:
-        `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        Date.now()+
+        "-" +
+        Math.random()
+        .toString(36)
+        .slice(2),
+
 
 
         eventType:
-        event.eventType,
+        data.eventType,
+
 
 
         username:
-        cleanUsername(event.username),
+        cleanUsername(
+            data.username
+        ),
 
-
-        giftType:
-        event.giftType || "",
-
-
-        coinValue:
-        Number(event.coinValue || 0),
-
-
-        quantity:
-        Number(event.quantity || 1),
 
 
         comment:
-        event.comment || "",
+        data.comment || "",
+
+
+
+        giftName:
+        data.giftName || "",
+
+
+
+        coinValue:
+        Number(
+            data.coinValue || 0
+        ),
+
+
+
+        quantity:
+        Number(
+            data.quantity || 1
+        ),
+
+
 
 
         createdAt:
-        new Date().toISOString()
+        new Date()
+        .toISOString()
 
 
-    });
 
+    };
+
+
+
+    eventQueue.push(event);
 
 
 
@@ -130,6 +170,13 @@ function addEvent(event){
     }
 
 
+
+    console.log(
+        "EVENTO ADICIONADO:",
+        event
+    );
+
+
 }
 
 
@@ -138,9 +185,13 @@ function addEvent(event){
 
 
 
-function isAuthorized(request){
+function authorized(req){
 
-    return request.get("x-bridge-token") === BRIDGE_TOKEN;
+    return (
+        req.get("x-bridge-token")
+        ===
+        BRIDGE_TOKEN
+    );
 
 }
 
@@ -150,304 +201,337 @@ function isAuthorized(request){
 
 
 
-// =======================
-// CRIA CONEXÃO NOVA
-// =======================
+// ==========================
+// CONEXÃO TIKTOK
+// ==========================
 
 
 function createConnection(){
 
 
 
-    const newConnection =
-        new TikTokLiveConnection(
+const conn =
+new TikTokLiveConnection(
 
-            TIKTOK_USERNAME,
+    TIKTOK_USERNAME,
 
-            {
+    {
 
-                processInitialData:false
-
-            }
-
-        );
-
-
-
-
-
-    newConnection.on(
-        "disconnected",
-        ()=>{
-
-
-            console.log(
-                "⚠️ TikTok desconectou"
-            );
-
-
-            connected = false;
-
-
-            scheduleReconnect();
-
-
-        }
-    );
-
-
-
-
-
-    newConnection.on(
-        "error",
-        (error)=>{
-
-
-            console.log(
-                "❌ Erro TikTok:",
-                error.message
-            );
-
-
-            connected = false;
-
-
-            scheduleReconnect();
-
-
-        }
-    );
-
-
-
-
-
-    newConnection.on(
-        "follow",
-        (data)=>{
-
-
-            const username =
-                cleanUsername(
-
-                    data.user?.uniqueId ||
-                    data.user?.nickname ||
-                    "TikTokUser"
-
-                );
-
-
-
-            liveFollowers.add(username);
-
-
-
-            console.log(
-                `⭐ ${username} seguiu`
-            );
-
-
-        }
-    );
-
-
-
-
-
-    newConnection.on(
-        "chat",
-        (data)=>{
-
-
-            handleChat(data);
-
-
-        }
-    );
-
-
-
-
-
-    newConnection.on(
-        WebcastEvent.GIFT,
-        (data)=>{
-
-
-            handleGift(data);
-
-
-        }
-    );
-
-
-
-
-
-    return newConnection;
-
-
-}
-
-
-
-
-
-
-
-async function scheduleReconnect(){
-
-
-
-    if(reconnecting){
-
-        return;
+        processInitialData:false
 
     }
 
+);
 
 
-    reconnecting = true;
 
+
+
+conn.on(
+"disconnected",
+()=>{
 
 
     console.log(
-        "🔄 Tentando reconectar em 10 segundos..."
+        "TikTok desconectado"
     );
 
 
-
-    setTimeout(async()=>{
-
-
-        reconnecting = false;
+    connected=false;
 
 
-        await connectTikTok();
+    reconnect();
+
+}
+
+);
 
 
-    },10000);
+
+
+
+
+conn.on(
+"error",
+(error)=>{
+
+
+    console.log(
+        "Erro TikTok:",
+        error.message
+    );
+
+
+    connected=false;
+
+
+    reconnect();
 
 
 }
-// =======================
+
+);
+
+
+
+
+
+
+
+conn.on(
+"follow",
+(data)=>{
+
+
+const username =
+cleanUsername(
+
+data.user?.uniqueId ||
+data.user?.nickname
+
+);
+
+
+
+liveFollowers.add(username);
+
+
+
+console.log(
+"NOVO FOLLOW:",
+username
+);
+
+
+
+}
+
+);
+
+
+
+
+
+conn.on(
+"chat",
+(data)=>{
+
+
+    handleChat(data);
+
+
+}
+
+);
+
+
+
+
+
+
+conn.on(
+WebcastEvent.GIFT,
+(data)=>{
+
+
+    handleGift(data);
+
+
+}
+
+);
+
+
+
+
+return conn;
+
+
+}
+
+
+
+
+
+
+async function reconnect(){
+
+
+if(reconnecting)
+return;
+
+
+
+reconnecting=true;
+
+
+
+console.log(
+"Reconectando em 10 segundos..."
+);
+
+
+
+setTimeout(async()=>{
+
+
+reconnecting=false;
+
+
+connectTikTok();
+
+
+
+},10000);
+
+
+
+}
+
+// ==========================
 // CHAT
-// =======================
+// ==========================
 
 
 function handleChat(data){
 
 
-    const username =
-        cleanUsername(
+const username =
+cleanUsername(
 
-            data.user?.uniqueId ||
-            data.user?.nickname ||
-            "TikTokUser"
+data.user?.uniqueId ||
+data.user?.nickname ||
+"usuario"
 
-        );
-
-
-
-    const comment =
-        data.comment ||
-        data.message ||
-        data.content ||
-        data.text ||
-        "";
-
-
-
-    if(!comment){
-
-        return;
-
-    }
-
-
-
-    if(comment.includes("@")){
-
-        return;
-
-    }
-
-
-
-    if(!liveFollowers.has(username)){
-
-        console.log(
-            `${username} comentou mas não segue`
-        );
-
-        return;
-
-    }
+);
 
 
 
 
 
-    if(usedChatUsers.has(username)){
-
-
-        console.log(
-            `${username} já criou personagem`
-        );
-
-
-        return;
-
-    }
-
-
-
-
-    usedChatUsers.add(username);
+const comment =
+data.comment ||
+data.message ||
+data.text ||
+"";
 
 
 
 
 
-    const totalCoins =
-        pendingGifts[username] || 0;
+if(!comment)
+return;
 
 
 
 
 
-    console.log("");
-    console.log("==============================");
-    console.log("🎮 NOVO PERSONAGEM");
-    console.log("TikTok:",username);
-    console.log("Roblox:",comment);
-    console.log("Moedas:",totalCoins);
-    console.log("==============================");
+if(comment.includes("@"))
+return;
 
 
 
 
 
-    addEvent({
-
-        eventType:"comment",
-
-        username,
-
-        comment,
-
-        coinValue:totalCoins,
-
-        quantity:1
-
-    });
 
 
+// precisa ter seguido
+
+if(!liveFollowers.has(username)){
+
+
+console.log(
+username,
+"comentou mas não segue"
+);
+
+
+return;
+
+
+}
 
 
 
-    delete pendingGifts[username];
+
+
+
+
+if(usedUsers.has(username)){
+
+
+console.log(
+username,
+"já tem personagem"
+);
+
+
+return;
+
+
+}
+
+
+
+
+
+
+usedUsers.add(username);
+
+
+
+
+
+
+const coins =
+pendingGifts[username]
+||
+0;
+
+
+
+
+
+
+console.log("");
+console.log("======================");
+console.log("NOVO NPC");
+console.log("TikTok:",username);
+console.log("Roblox:",comment);
+console.log("Moedas:",coins);
+console.log("======================");
+
+
+
+
+
+
+createEvent({
+
+
+eventType:"comment",
+
+
+username,
+
+
+comment,
+
+
+coinValue:coins,
+
+
+quantity:1
+
+
+});
+
+
+
+
+
+delete pendingGifts[username];
+
 
 
 }
@@ -459,114 +543,173 @@ function handleChat(data){
 
 
 
-// =======================
+
+// ==========================
 // PRESENTES
-// =======================
+// ==========================
 
 
 function handleGift(data){
 
 
 
-    if(data.repeatEnd === false){
+// final do presente
 
-        return;
-
-    }
-
-
-
-
-    const username =
-        cleanUsername(
-
-            data.user?.uniqueId ||
-            data.user?.nickname ||
-            "TikTokUser"
-
-        );
-
-
-
-
-
-    if(!liveFollowers.has(username)){
-
-
-        console.log(
-            `${username} enviou presente mas não segue`
-        );
-
-
-        return;
-
-
-    }
-
-
-
-
-
-    const giftName =
-
-        data.giftDetails?.giftName ||
-        data.giftName ||
-        "Gift";
-
-
-
-
-
-    const coinValue = Number(
-
-        data.giftDetails?.diamondCount ||
-        data.diamondCount ||
-        0
-
-    );
-
-
-
-
-
-    const quantity = Number(
-
-        data.repeatCount ||
-        1
-
-    );
-
-
-
-
-
-    const totalCoins =
-        coinValue * quantity;
-
-
-
-
-
-    pendingGifts[username] =
-        (pendingGifts[username] || 0)
-        +
-        totalCoins;
+if(data.repeatEnd === false)
+return;
 
 
 
 
 
 
-    console.log("");
-    console.log("==============================");
-    console.log("🎁 PRESENTE");
-    console.log("Usuário:",username);
-    console.log("Gift:",giftName);
-    console.log("Moedas:",totalCoins);
-    console.log("Total:",pendingGifts[username]);
-    console.log("⏳ Esperando nick Roblox");
-    console.log("==============================");
 
+const username =
+cleanUsername(
+
+data.user?.uniqueId ||
+data.user?.nickname ||
+"usuario"
+
+);
+
+
+
+
+
+
+if(!liveFollowers.has(username)){
+
+
+console.log(
+username,
+"mandou presente mas não segue"
+);
+
+
+return;
+
+
+}
+
+
+
+
+
+
+
+
+const giftName =
+
+data.giftDetails?.giftName ||
+data.giftName ||
+"Gift";
+
+
+
+
+
+
+
+const coinValue = Number(
+
+data.giftDetails?.diamondCount ||
+data.diamondCount ||
+0
+
+);
+
+
+
+
+
+
+
+const quantity = Number(
+
+data.repeatCount ||
+1
+
+);
+
+
+
+
+
+
+
+
+const totalCoins =
+coinValue *
+quantity;
+
+
+
+
+
+
+
+console.log("");
+console.log("======================");
+console.log("PRESENTE");
+console.log("Usuario:",username);
+console.log("Gift:",giftName);
+console.log("Moedas:",totalCoins);
+console.log("======================");
+
+
+
+
+
+
+
+
+// GALAXIA 1000+
+
+if(
+totalCoins >= 1000
+&&
+(
+giftName
+.toLowerCase()
+.includes("galaxy")
+||
+giftName
+.toLowerCase()
+.includes("galaxia")
+)
+
+){
+
+
+console.log(
+"🚀 GALAXIA DETECTADA!"
+);
+
+
+
+createEvent({
+
+eventType:"galaxy",
+
+
+username,
+
+
+giftName,
+
+
+coinValue:totalCoins,
+
+
+quantity
+
+
+});
+
+
+
+return;
 
 
 }
@@ -579,38 +722,103 @@ function handleGift(data){
 
 
 
-// =======================
+// presente normal
+
+
+pendingGifts[username] =
+
+(
+pendingGifts[username]
+||
+0
+)
+
++
+
+totalCoins;
+
+
+
+
+
+
+console.log(
+"Esperando nick Roblox:",
+pendingGifts[username]
+);
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+// ==========================
 // API ROBLOX
-// =======================
-
-
-app.get("/events",(req,res)=>{
-
-
-    if(!isAuthorized(req)){
-
-
-        return res.status(401).json({
-
-            error:"Unauthorized"
-
-        });
-
-
-    }
+// ==========================
 
 
 
+app.get(
+"/events",
+(req,res)=>{
 
 
-    res.json({
-
-        connected,
-
-        events:eventQueue
+if(!authorized(req)){
 
 
-    });
+return res.status(401)
+.json({
+
+error:"Unauthorized"
+
+});
+
+
+}
+
+
+
+
+
+
+const events =
+[...eventQueue];
+
+
+
+
+
+
+// remove depois que entrega
+
+eventQueue.length = 0;
+
+
+
+
+
+
+
+res.json({
+
+connected,
+
+
+events
+
+
+});
+
+
+
 
 
 });
@@ -622,107 +830,117 @@ app.get("/events",(req,res)=>{
 
 
 
-app.get("/",(req,res)=>{
+
+app.get(
+"/",
+(req,res)=>{
 
 
-    res.json({
+res.json({
 
-        service:"tiktok-roblox-bridge",
-
-        connected,
-
-        username:TIKTOK_USERNAME,
-
-        queuedEvents:eventQueue.length
+service:
+"tiktok-roblox-bridge",
 
 
-    });
+connected,
+
+
+username:
+TIKTOK_USERNAME,
+
+
+queuedEvents:
+eventQueue.length
 
 
 });
 
 
+});
 
-
-
-
-
-
-
-// =======================
+// ==========================
 // CONECTAR TIKTOK
-// =======================
+// ==========================
 
 
 async function connectTikTok(){
 
 
-    try{
+try{
 
 
-        if(connection){
+if(connection){
 
 
-            try{
+try{
 
-                await connection.disconnect();
+await connection.disconnect();
 
-            }catch(e){}
-
-
-        }
+}catch(e){}
 
 
 
-
-        connection =
-            createConnection();
+}
 
 
 
 
 
-        await connection.connect();
+
+connection =
+createConnection();
 
 
 
 
 
-        connected = true;
+
+await connection.connect();
 
 
 
 
 
-        console.log("");
-        console.log("==============================");
-        console.log("✅ TikTok LIVE conectado");
-        console.log("👤",TIKTOK_USERNAME);
-        console.log("==============================");
+
+connected = true;
 
 
 
 
 
-    }catch(error){
+
+console.log("");
+console.log("==========================");
+console.log("✅ TIKTOK LIVE CONECTADO");
+console.log("👤",TIKTOK_USERNAME);
+console.log("==========================");
 
 
 
-        connected = false;
 
 
 
-        console.log(
-            "❌ Falha conexão:",
-            error.message
-        );
+
+}catch(error){
 
 
 
-        scheduleReconnect();
+connected=false;
 
 
-    }
+
+console.log(
+"Erro ao conectar:",
+error.message
+);
+
+
+
+reconnect();
+
+
+
+}
 
 
 
@@ -736,53 +954,67 @@ async function connectTikTok(){
 
 
 
-// =======================
-// LIMPEZA
-// =======================
+
+
+// ==========================
+// LIMPEZA DE EVENTOS
+// ==========================
 
 
 setInterval(()=>{
 
 
-
-    const now = Date.now();
-
-
-
-
-    for(
-        let i = eventQueue.length - 1;
-        i >= 0;
-        i--
-    ){
-
-
-
-        const age =
-
-            now -
-            new Date(
-                eventQueue[i].createdAt
-            ).getTime();
+const now =
+Date.now();
 
 
 
 
 
-        if(age > 600000){
+for(
+let i = eventQueue.length -1;
+i >= 0;
+i--
+){
 
 
-            eventQueue.splice(
-                i,
-                1
-            );
 
 
-        }
+
+const event =
+eventQueue[i];
 
 
-    }
 
+
+
+const age =
+
+now -
+new Date(
+event.createdAt
+)
+.getTime();
+
+
+
+
+
+
+if(age > EVENT_TIMEOUT){
+
+
+eventQueue.splice(
+i,
+1
+);
+
+
+}
+
+
+
+}
 
 
 
@@ -797,23 +1029,57 @@ setInterval(()=>{
 
 
 
-// =======================
-// START
-// =======================
 
 
-app.listen(PORT,()=>{
+// ==========================
+// LIMPEZA DE USUARIOS
+// ==========================
 
 
-    console.log("");
-    console.log("==============================");
-    console.log("🚀 Bridge online");
-    console.log("🌐 Porta:",PORT);
-    console.log("==============================");
+setInterval(()=>{
+
+
+usedUsers.clear();
+
+
+console.log(
+"Lista de usuarios resetada"
+);
 
 
 
-    connectTikTok();
+},1800000);
+
+
+
+
+
+
+
+
+
+
+
+
+// ==========================
+// START SERVER
+// ==========================
+
+
+app.listen(
+PORT,
+()=>{
+
+
+console.log("");
+console.log("==========================");
+console.log("🚀 BRIDGE ONLINE");
+console.log("🌐 PORTA:",PORT);
+console.log("==========================");
+
+
+
+connectTikTok();
 
 
 
